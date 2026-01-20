@@ -6,15 +6,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Roaming Data Usage Dashboard</title>
 
-  <!-- UI libs (CDNs are allowed by SharePoint when loading a raw HTML from the library) -->
+  <!-- UI libraries -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/typed.js/2.0.12/typed.min.js"></script>
   <script src="https://unpkg.com/splitting@1.0.6/dist/splitting.js"></script>
   <link rel="stylesheet" href="https://unpkg.com/splitting@1.0.6/dist/splitting.css">
-  <!-- SheetJS for Excel parsing -->
-  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <!-- Fonts -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Source+Sans+Pro:wght@300;400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 
@@ -27,9 +25,9 @@
     .card-hover { transition: all 0.3s ease; }
     .card-hover:hover { transform: translateY(-4px); box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
     .pulse-dot { animation: pulse 2s infinite; }
-    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
-    .loading-skeleton { background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%); background-size: 200% 100%; animation: loading 1.5s infinite; }
-    @keyframes loading { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.5;} }
+    .loading-skeleton { background: linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%); background-size:200% 100%; animation:loading 1.5s infinite; }
+    @keyframes loading { 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
     .progress-bar { height:8px; border-radius:9999px; background:#e5e7eb; position:relative; overflow:hidden; }
     .progress-fill { height:100%; border-radius:9999px; }
   </style>
@@ -237,7 +235,7 @@
           </div>
         </div>
 
-        <!-- Right Column - Filters & Alerts -->
+        <!-- Right Column -->
         <div class="lg:col-span-1">
           <div class="bg-white rounded-xl shadow-lg p-6">
             <h3 class="font-display text-lg font-semibold text-gray-900 mb-4">Filters & Controls</h3>
@@ -281,6 +279,7 @@
             <button class="w-full mt-4 text-blue-600 hover:text-blue-700 text-sm font-medium">View All Alerts →</button>
           </div>
         </div>
+
       </div>
     </div>
   </section>
@@ -294,7 +293,7 @@
           <p class="text-slate-400 text-sm mt-1">Powered by ECharts.js and Real-time Data Processing</p>
         </div>
         <div class="text-right">
-          <p class="text-slate-300">Data Source: Microsoft Teams Channel</p>
+          <p class="text-slate-300">Data Source: GitHub Pages (JSON)</p>
           <p class="text-slate-400 text-sm mt-1">Auto-refresh every 5 minutes</p>
         </div>
       </div>
@@ -305,33 +304,17 @@
   <div id="loading-overlay" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
     <div class="bg-white rounded-lg p-8 text-center">
       <div class="loading-skeleton w-16 h-16 rounded-full mx-auto mb-4"></div>
-      <p class="text-gray-600">Processing new data file...</p>
+      <p class="text-gray-600">Loading data...</p>
     </div>
   </div>
 
-  <!-- Data + Rendering for SharePoint -->
   <script>
-    /********** === CONFIG: adjust if needed === **********/
-    const SITE_URL = "https://ttigroup.sharepoint.com/sites/Mobile";
-    const FOLDER_DECODED_URL = "/sites/Mobile/Shared Documents/Dashboard Files"; // folder path only
-    // Column names in your Excel workbook
-    const NAME_COL  = "Subscriber Name";
-    const VAS_COL   = "Contract 1 Code";
-    const USAGE_COL = "Roam usage in MB";
-    // JSON fallback file path (same folder)
-    const JSON_URL  = "/sites/Mobile/Shared%20Documents/Dashboard%20Files/dashboard_data.json";
+    // ---- JSON-only mode: fetch dashboard_data.json from the same repo ----
+    const JSON_URL = './dashboard_data.json';
 
-    /********** === Helpers === **********/
-    function entitledGB(v){
-      v = (v ?? "").toUpperCase();
-      if (v.startsWith("RCD3F") || v.startsWith("RCD3G")) return 6;   // APAC
-      if (v.startsWith("RCD3L") || v.startsWith("RCD3T")) return 10;  // Global
-      return 6;
-    }
-    function detectRegion(v){
-      v = (v ?? "").toUpperCase();
-      return (v.startsWith("RCD3F") || v.startsWith("RCD3G")) ? "APAC" : "Global";
-    }
+    let allUsers = [], filteredUsers = [];
+    let sortKey = "total_usage_gb", sortDir = -1, page = 0, pageSize = 20;
+
     function z(n){ return String(n).padStart(2,"0"); }
     function updateTimestamp(){
       const d = new Date();
@@ -339,137 +322,7 @@
         `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
     }
 
-    /********** === SharePoint REST: newest file in folder === **********/
-    async function getNewestFileUrl(){
-      // Use the *decodedurl* flavor and don't pass AllItems.aspx
-      const api = `${SITE_URL}/_api/web/GetFolderByServerRelativePath(decodedurl='${encodeURIComponent(FOLDER_DECODED_URL).replace(/%2F/g,'/')}')/Files?$orderby=TimeLastModified desc&$top=1`;
-      const rsp = await fetch(api, { credentials: "include", headers: { "accept": "application/json;odata=nometadata" } });
-      if (!rsp.ok) throw new Error(`SharePoint REST error: ${rsp.status}`);
-      const json = await rsp.json();
-      if (!json.value || !json.value.length) throw new Error("No Excel file found in the folder");
-      const file = json.value[0];
-      // Stream the binary
-      return `${SITE_URL}/_api/web/GetFileByServerRelativePath(decodedurl='${encodeURIComponent(file.ServerRelativeUrl).replace(/%2F/g,'/')}')/$value`;
-    }
-
-    /********** === Load Excel (newest) === **********/
-    async function loadExcelUsers(){
-      const url = await getNewestFileUrl();
-      const rsp = await fetch(url, { credentials: "include", cache: "no-store" });
-      if (!rsp.ok) throw new Error(`Excel download failed: ${rsp.status}`);
-      const buf = await rsp.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
-
-      let wsName = wb.SheetNames[0];
-      for (const n of wb.SheetNames){
-        const row0 = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, defval: "" })[0] ?? [];
-        if (row0.includes(USAGE_COL)) { wsName = n; break; }
-      }
-
-      const ws = wb.Sheets[wsName];
-      const rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
-
-      const users = [];
-      for (const r of rows){
-        const name = String(r[NAME_COL] ?? "").trim();
-        const vas  = String(r[VAS_COL] ?? "").trim();
-        const mb   = Number(r[USAGE_COL] ?? 0);
-        if (!name && !vas && !mb) continue;
-
-        const usageGB = mb / 1024;
-        const entGB   = entitledGB(vas);
-        const pct     = entGB ? (usageGB / entGB) * 100 : 0;
-        const m       = /\(([^)]+)\)\s*$/.exec(name);    // dept at end of name e.g. " (IT)"
-        const dept    = m ? m[1] : "Unknown";
-        users.push({
-          user_id: (name.split(" ")[0] || name || "USER").toUpperCase(),
-          department: dept,
-          region: detectRegion(vas),
-          vas_code: vas,
-          total_usage_gb: Number(usageGB.toFixed(3)),
-          entitled_gb: entGB,
-          usage_percentage: Number(pct.toFixed(1))
-        });
-      }
-      return users;
-    }
-
-    /********** === JSON fallback === **********/
-    async function loadJsonFallback(){
-      const rsp = await fetch(JSON_URL, { credentials: "include", cache: "no-store" });
-      if (!rsp.ok) throw new Error(`JSON fallback download failed: ${rsp.status}`);
-      const json = await rsp.json();
-      // Convert your JSON summary/regional/top_users into the users[] shape we render
-      if (Array.isArray(json.top_users) && json.top_users.length){
-        return json.top_users.map(u => ({
-          user_id: u.User_ID || u.user_id,
-          region: u.Region || u.region,
-          department: u.Department || u.department || "Unknown",
-          vas_code: u.VAS_Code || u.vas_code || "",
-          total_usage_gb: u.Total_Usage_GB ?? u.total_usage_gb ?? 0,
-          entitled_gb: u.Entitled_GB ?? u.entitled_gb ?? 6,
-          usage_percentage: u.Usage_Percentage ?? u.usage_percentage ?? 0
-        }));
-      }
-      throw new Error("JSON present but no top_users array found");
-    }
-
-    /********** === Render logic (same look-and-feel as your local file) === **********/
-    let allUsers = [], filteredUsers = [];
-    let sortKey = "total_usage_gb", sortDir = -1, page = 0, pageSize = 20;
-
-    function renderKPIs(data){
-      const sum = (a,b)=>a+b;
-      const totalUsers = data.length;
-      const totalEnt = data.map(u=>u.entitled_gb).reduce(sum,0);
-      const totalUse = data.map(u=>u.total_usage_gb).reduce(sum,0);
-      const overallPct = totalEnt ? (totalUse/totalEnt)*100 : 0;
-      const avgPerUser = totalUsers ? totalUse/totalUsers : 0;
-
-      document.getElementById("total-users").textContent = totalUsers.toLocaleString();
-      document.getElementById("total-usage").textContent = `${totalUse.toFixed(1)} GB`;
-      document.getElementById("entitled-total").textContent = totalEnt.toFixed(1);
-      document.getElementById("avg-per-user").textContent = `${avgPerUser.toFixed(1)} GB`;
-      document.getElementById("overall-bar").style.width = `${Math.min(overallPct,100).toFixed(1)}%`;
-      document.getElementById("overall-pct-label").textContent = `${overallPct.toFixed(1)}% of allocation used`;
-      document.getElementById("gauge-value").textContent = `${totalUse.toFixed(1)} GB`;
-      document.getElementById("gauge-entitled").textContent = totalEnt.toFixed(1);
-
-      const badge = document.getElementById("gauge-status");
-      if (overallPct >= 150) { badge.textContent = `Critical: ${overallPct.toFixed(1)}% used`; badge.classList.remove("hidden"); }
-      else if (overallPct >= 100) { badge.textContent = `Over Allocation: ${overallPct.toFixed(1)}%`; badge.classList.remove("hidden"); }
-      else { badge.classList.add("hidden"); }
-
-      renderGauge(Math.min(overallPct, 100));
-
-      const apac = data.filter(u=>u.region==="APAC");
-      const global = data.filter(u=>u.region==="Global");
-      const apUse = apac.map(u=>u.total_usage_gb).reduce(sum,0);
-      const glUse = global.map(u=>u.total_usage_gb).reduce(sum,0);
-      const apEnt = apac.map(u=>u.entitled_gb).reduce(sum,0);
-      const glEnt = global.map(u=>u.entitled_gb).reduce(sum,0);
-
-      document.getElementById("apac-users").textContent = apac.length;
-      document.getElementById("global-users").textContent = global.length;
-      document.getElementById("avg-usage").textContent = `${avgPerUser.toFixed(1)} GB`;
-      document.getElementById("contract-types").textContent = new Set(data.map(u=>String(u.vas_code||"").split(" ")[0])).size;
-
-      document.getElementById("apac-usage").textContent = `${apUse.toFixed(1)} GB`;
-      document.getElementById("apac-entitled").textContent = apEnt.toFixed(1);
-      document.getElementById("apac-pct").textContent = apEnt ? ((apUse/apEnt)*100).toFixed(1) : "0.0";
-      renderDonut("apac-chart", [
-        {name:"Usage", value:Number(apUse.toFixed(1))},
-        {name:"Remain", value:Number(Math.max(apEnt-apUse,0).toFixed(1))}
-      ]);
-
-      document.getElementById("global-usage").textContent = `${glUse.toFixed(1)} GB`;
-      document.getElementById("global-entitled").textContent = glEnt.toFixed(1);
-      document.getElementById("global-pct").textContent = glEnt ? ((glUse/glEnt)*100).toFixed(1) : "0.0";
-      renderDonut("global-chart", [
-        {name:"Usage", value:Number(glUse.toFixed(1))},
-        {name:"Remain", value:Number(Math.max(glEnt-glUse,0).toFixed(1))}
-      ]);
-    }
+    function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c])); }
 
     function renderGauge(pct){
       const el = document.getElementById("speedometer-gauge");
@@ -502,7 +355,75 @@
       window.addEventListener("resize", ()=>chart.resize());
     }
 
-    function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c])); }
+    function renderKPIsFromJson(json){
+      // Build aggregates from the user list if present, else fallback to summary
+      let users = json.top_users?.map(u => ({
+        user_id: u.User_ID || u.user_id,
+        region: u.Region || u.region,
+        department: u.Department || u.department || "Unknown",
+        vas_code: u.VAS_Code || u.vas_code || "",
+        total_usage_gb: u.Total_Usage_GB ?? u.total_usage_gb ?? 0,
+        entitled_gb: u.Entitled_GB ?? u.entitled_gb ?? 6,
+        usage_percentage: u.Usage_Percentage ?? u.usage_percentage ?? 0
+      })) || [];
+
+      allUsers = users; filteredUsers = users.slice();
+
+      // Aggregates
+      const sum = (a,b)=>a+b;
+      const totalUsers = users.length;
+      const totalEnt = users.map(u=>u.entitled_gb).reduce(sum,0);
+      const totalUse = users.map(u=>u.total_usage_gb).reduce(sum,0);
+      const overallPct = totalEnt ? (totalUse/totalEnt)*100 : 0;
+      const avgPerUser = totalUsers ? totalUse/totalUsers : 0;
+
+      // KPIs
+      document.getElementById("total-users").textContent = totalUsers.toLocaleString();
+      document.getElementById("total-usage").textContent = `${totalUse.toFixed(1)} GB`;
+      document.getElementById("entitled-total").textContent = totalEnt.toFixed(1);
+      document.getElementById("avg-per-user").textContent = `${avgPerUser.toFixed(1)} GB`;
+      document.getElementById("overall-bar").style.width = `${Math.min(overallPct,100).toFixed(1)}%`;
+      document.getElementById("overall-pct-label").textContent = `${overallPct.toFixed(1)}% of allocation used`;
+      document.getElementById("gauge-value").textContent = `${totalUse.toFixed(1)} GB`;
+      document.getElementById("gauge-entitled").textContent = totalEnt.toFixed(1);
+
+      const badge = document.getElementById("gauge-status");
+      if (overallPct >= 150) { badge.textContent = `Critical: ${overallPct.toFixed(1)}% used`; badge.classList.remove("hidden"); }
+      else if (overallPct >= 100) { badge.textContent = `Over Allocation: ${overallPct.toFixed(1)}%`; badge.classList.remove("hidden"); }
+      else { badge.classList.add("hidden"); }
+
+      renderGauge(Math.min(overallPct, 100));
+
+      const apac = users.filter(u=>u.region==="APAC");
+      const global = users.filter(u=>u.region==="Global");
+      const apUse = apac.map(u=>u.total_usage_gb).reduce(sum,0);
+      const glUse = global.map(u=>u.total_usage_gb).reduce(sum,0);
+      const apEnt = apac.map(u=>u.entitled_gb).reduce(sum,0);
+      const glEnt = global.map(u=>u.entitled_gb).reduce(sum,0);
+
+      document.getElementById("apac-users").textContent = apac.length;
+      document.getElementById("global-users").textContent = global.length;
+      document.getElementById("avg-usage").textContent = `${avgPerUser.toFixed(1)} GB`;
+      document.getElementById("contract-types").textContent = new Set(users.map(u=>String(u.vas_code||"").split(" ")[0])).size;
+
+      document.getElementById("apac-usage").textContent = `${apUse.toFixed(1)} GB`;
+      document.getElementById("apac-entitled").textContent = apEnt.toFixed(1);
+      document.getElementById("apac-pct").textContent = apEnt ? ((apUse/apEnt)*100).toFixed(1) : "0.0";
+      renderDonut("apac-chart", [
+        {name:"Usage", value:Number(apUse.toFixed(1))},
+        {name:"Remain", value:Number(Math.max(apEnt-apUse,0).toFixed(1))}
+      ]);
+
+      document.getElementById("global-usage").textContent = `${glUse.toFixed(1)} GB`;
+      document.getElementById("global-entitled").textContent = glEnt.toFixed(1);
+      document.getElementById("global-pct").textContent = glEnt ? ((glUse/glEnt)*100).toFixed(1) : "0.0";
+      renderDonut("global-chart", [
+        {name:"Usage", value:Number(glUse.toFixed(1))},
+        {name:"Remain", value:Number(Math.max(glEnt-glUse,0).toFixed(1))}
+      ]);
+
+      renderTable(filteredUsers);
+    }
 
     function renderTable(data){
       data.sort((a,b)=> (a[sortKey] > b[sortKey] ? sortDir : -sortDir));
@@ -540,8 +461,7 @@
         return inRegion && text.includes(q);
       });
       page = 0;
-      renderKPIs(filteredUsers);
-      renderTable(filteredUsers);
+      renderKPIsFromJson({ top_users: filteredUsers }); // re-aggregate from filtered
     }
     function sortTable(key){ if (sortKey===key) sortDir*=-1; else { sortKey = key; sortDir = -1; } renderTable(filteredUsers); }
     function nextPage(){ if ((page+1)*pageSize < filteredUsers.length){ page++; renderTable(filteredUsers); } }
@@ -551,27 +471,20 @@
       const overlay = document.getElementById("loading-overlay");
       overlay.classList.remove("hidden"); overlay.classList.add("flex");
       try{
-        // Try newest Excel first; if it fails, fall back to JSON
-        try{
-          allUsers = await loadExcelUsers();
-        }catch(excelErr){
-          console.warn("Excel load failed, trying JSON fallback.", excelErr);
-          allUsers = await loadJsonFallback();
-        }
-        filteredUsers = allUsers.slice();
+        const rsp = await fetch(JSON_URL, { cache: "no-store" });
+        if (!rsp.ok) throw new Error(`JSON fetch failed: ${rsp.status}`);
+        const json = await rsp.json();
         updateTimestamp();
-        renderKPIs(filteredUsers);
-        renderTable(filteredUsers);
+        renderKPIsFromJson(json);
       }catch(e){
         console.error(e);
-        alert("Could not load data: " + e.message);
+        alert("Could not load JSON: " + e.message);
       }finally{
         overlay.classList.add("hidden"); overlay.classList.remove("flex");
       }
     }
 
     document.addEventListener("DOMContentLoaded", () => {
-      // Optional: typewriter effect on title if Typed.js present
       if (typeof Typed !== "undefined"){
         new Typed('#dashboard-title', {
           strings: ['Roaming Data Usage Dashboard', 'Real-time Analytics Dashboard', 'Network Usage Monitor'],
@@ -584,3 +497,4 @@
   </script>
 </body>
 </html>
+``
