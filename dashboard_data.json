@@ -1,0 +1,204 @@
+{
+  "summary": {
+    "total_users": 256,
+    "total_entitled_gb": 24.0,
+    "total_usage_gb": 767.7,
+    "overall_usage_percentage": 3198.7
+  },
+  "regional_data": {
+    "apac": {
+      "users": 88,
+      "entitled_gb": 12.0,
+      "usage_gb": 301.1,
+      "percentage": 2508.8
+    },
+    "global": {
+      "users": 168,
+      "entitled_gb": 12.0,
+      "usage_gb": 466.6,
+      "percentage": 3888.6
+    }
+  },
+  "top_users": [
+    {
+      "User_ID": "USER_AP_012",
+      "Region": "APAC",
+      "VAS_Code": "RCD3F",
+      "Department": "IT",
+      "Total_Usage_GB": 14.897931196974422,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 248.29885328290703
+    },
+    {
+      "User_ID": "USER_AP_019",
+      "Region": "APAC",
+      "VAS_Code": "RCD3F",
+      "Department": "Finance",
+      "Total_Usage_GB": 13.862663108696337,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 231.04438514493896
+    },
+    {
+      "User_ID": "USER_AP_010",
+      "Region": "APAC",
+      "VAS_Code": "RCD3F",
+      "Department": "Sales",
+      "Total_Usage_GB": 13.82156362966478,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 230.35939382774635
+    },
+    {
+      "User_ID": "USER_AP_014",
+      "Region": "APAC",
+      "VAS_Code": "RCD3F",
+      "Department": "IT",
+      "Total_Usage_GB": 12.891215415672008,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 214.85359026120014
+    },
+    {
+      "User_ID": "USER_Gl_002",
+      "Region": "Global",
+      "VAS_Code": "RCD3F",
+      "Department": "Sales",
+      "Total_Usage_GB": 12.846129676696158,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 214.10216127826928
+    },
+    {
+      "User_ID": "USER_Gl_018",
+      "Region": "Global",
+      "VAS_Code": "RCD3F",
+      "Department": "Finance",
+      "Total_Usage_GB": 12.766076759583324,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 212.7679459930554
+    },
+    {
+      "User_ID": "USER_Gl_011",
+      "Region": "Global",
+      "VAS_Code": "RCD3F",
+      "Department": "Sales",
+      "Total_Usage_GB": 12.572534194441129,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 209.5422365740188
+    },
+    {
+      "User_ID": "USER_AP_016",
+      "Region": "APAC",
+      "VAS_Code": "RCD3F",
+      "Department": "Finance",
+      "Total_Usage_GB": 12.381075734195942,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 206.35126223659904
+    },
+    {
+      "User_ID": "USER_Gl_013",
+      "Region": "Global",
+      "VAS_Code": "RCD3F",
+      "Department": "Finance",
+      "Total_Usage_GB": 11.798773469073428,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 196.64622448455714
+    },
+    {
+      "User_ID": "USER_AP_017",
+      "Region": "APAC",
+      "VAS_Code": "RCD3G",
+      "Department": "Finance",
+      "Total_Usage_GB": 11.768124535874833,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 196.1354089312472
+    },
+    {
+      "User_ID": "USER_AP_011",
+      "Region": "APAC",
+      "VAS_Code": "RCD3G",
+      "Department": "Finance",
+      "Total_Usage_GB": 11.126046149662209,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 185.43410249437014
+    },
+    {
+      "User_ID": "USER_AP_008",
+      "Region": "APAC",
+      "VAS_Code": "RCD3G",
+      "Department": "Marketing",
+      "Total_Usage_GB": 11.112872187103841,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 185.21453645173068
+    },
+    {
+      "User_ID": "USER_AP_013",
+      "Region": "APAC",
+      "VAS_Code": "RCD3G",
+      "Department": "Sales",
+      "Total_Usage_GB": 10.809295455907161,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 180.15492426511938
+    },
+    {
+      "User_ID": "USER_AP_002",
+      "Region": "APAC",
+      "VAS_Code": "RCD3F",
+      "Department": "IT",
+      "Total_Usage_GB": 10.738005533297251,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 178.96675888828753
+    },
+    {
+      "User_ID": "USER_Gl_006",
+      "Region": "Global",
+      "VAS_Code": "RCD3G",
+      "Department": "IT",
+      "Total_Usage_GB": 9.422865697544726,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 157.04776162574544
+    },
+    {
+      "User_ID": "USER_AP_020",
+      "Region": "APAC",
+      "VAS_Code": "RCD3F",
+      "Department": "IT",
+      "Total_Usage_GB": 9.216907338494257,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 153.61512230823763
+    },
+    {
+      "User_ID": "USER_Gl_017",
+      "Region": "Global",
+      "VAS_Code": "RCD3G",
+      "Department": "IT",
+      "Total_Usage_GB": 9.143399139703712,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 152.38998566172853
+    },
+    {
+      "User_ID": "USER_Gl_008",
+      "Region": "Global",
+      "VAS_Code": "RCD3G",
+      "Department": "Marketing",
+      "Total_Usage_GB": 8.829983121792331,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 147.1663853632055
+    },
+    {
+      "User_ID": "USER_AP_004",
+      "Region": "APAC",
+      "VAS_Code": "RCD3G",
+      "Department": "IT",
+      "Total_Usage_GB": 8.767388905223495,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 146.12314842039157
+    },
+    {
+      "User_ID": "USER_Gl_014",
+      "Region": "Global",
+      "VAS_Code": "RCD3F",
+      "Department": "Operations",
+      "Total_Usage_GB": 7.853743844972271,
+      "Entitled_GB": 6,
+      "Usage_Percentage": 130.89573074953788
+    }
+  ]
+}
