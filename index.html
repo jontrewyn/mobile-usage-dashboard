@@ -1,311 +1,358 @@
 
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Roaming Data Usage Dashboard</title>
+// ---- JSON-only mode: fetch dashboard_data.json from the same repo ----
+const JSON_URL = './dashboard_data.json';
 
-  <!-- UI libraries -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/echarts/5.4.3/echarts.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/typed.js/2.0.12/typed.min.js"></script>
-  <script src="https://unpkg.com/splitting@1.0.6/dist/splitting.js"></script>
-  <link rel="stylesheet" href="https://unpkg.com/splitting@1.0.6/dist/splitting.css">
-  <!-- Fonts -->
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Source+Sans+Pro:wght@300;400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+// Globals
+let allUsers = [], filteredUsers = [];
+let sortKey = "total_usage_gb", sortDir = -1, page = 0, pageSize = 20;
 
-  <style>
-    body { font-family: 'Source Sans Pro', sans-serif; }
-    .font-display { font-family: 'Inter', sans-serif; }
-    .font-mono { font-family: 'JetBrains Mono', monospace; }
-    .bg-pattern { background-image: radial-gradient(circle at 1px 1px, rgba(255,255,255,0.15) 1px, transparent 0); background-size: 20px 20px; }
-    .gauge-container { position: relative; height: 300px; }
-    .card-hover { transition: all 0.3s ease; }
-    .card-hover:hover { transform: translateY(-4px); box-shadow: 0 10px 25px rgba(0,0,0,0.15); }
-    .pulse-dot { animation: pulse 2s infinite; }
-    @keyframes pulse { 0%,100%{opacity:1;} 50%{opacity:.5;} }
-    .loading-skeleton { background: linear-gradient(90deg,#f0f0f0 25%,#e0e0e0 50%,#f0f0f0 75%); background-size:200% 100%; animation:loading 1.5s infinite; }
-    @keyframes loading { 0%{background-position:200% 0;} 100%{background-position:-200% 0;} }
-    .progress-bar { height:8px; border-radius:9999px; background:#e5e7eb; position:relative; overflow:hidden; }
-    .progress-fill { height:100%; border-radius:9999px; }
-  </style>
-</head>
-<body class="bg-gray-50 min-h-screen">
-  <!-- Header -->
-  <header class="bg-gradient-to-r from-slate-800 to-blue-900 text-white py-6 bg-pattern">
-    <div class="container mx-auto px-6">
-      <div class="flex items-center justify-between">
-        <div>
-          <h1 class="font-display text-3xl font-bold mb-2" id="dashboard-title">Roaming Data Usage Dashboard</h1>
-          <p class="text-blue-200">Real-time monitoring and analytics for mobile network usage</p>
+// Utils
+function z(n){ return String(n).padStart(2,"0"); }
+function updateTimestamp(){
+  const d = new Date();
+  const el = document.getElementById("last-updated");
+  if (el) el.textContent =
+    `${d.getFullYear()}-${z(d.getMonth()+1)}-${z(d.getDate())} ${z(d.getHours())}:${z(d.getMinutes())}:${z(d.getSeconds())}`;
+}
+function escapeHtml(s){ return String(s).replace(/[&<>\"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;" }[c])); }
+
+// Notifications (simple)
+function showNotification(message, type = 'info'){
+  const colors = {
+    success: 'bg-green-600',
+    error:   'bg-red-600',
+    warning: 'bg-amber-600',
+    info:    'bg-blue-600'
+  };
+  const n = document.createElement('div');
+  n.className = `fixed top-4 right-4 z-50 text-white px-4 py-2 rounded-lg shadow-lg ${colors[type]||colors.info}`;
+  n.textContent = message;
+  document.body.appendChild(n);
+  const fadeOut = () => { n.style.transition='opacity .3s'; n.style.opacity='0'; setTimeout(()=>n.remove(), 300); };
+  setTimeout(fadeOut, 2500);
+}
+
+// Charts
+function renderGauge(pct){
+  const el = document.getElementById("speedometer-gauge");
+  if (!el) return;
+  const chart = echarts.init(el);
+  chart.setOption({
+    series: [{
+      type: "gauge", startAngle: 180, endAngle: 0, min: 0, max: 100,
+      radius: "90%", center: ["50%","75%"],
+      axisLine: { lineStyle: { width: 20, color: [[0.7,"#22c55e"],[0.9,"#f59e0b"],[1.0,"#ef4444"]] } },
+      pointer: { length: "70%", width: 6, itemStyle:{ color:"auto" } },
+      axisTick: { distance: -25, length: 8, lineStyle:{ color:"#fff", width:2 } },
+      splitLine: { distance: -30, length: 15, lineStyle:{ color:"#fff", width:2 } },
+      axisLabel: { color:"#374151", distance:-50, fontSize:12, formatter:v=>v+"%" },
+      detail: { valueAnimation:true, formatter:v=>Math.round(v)+"%", color:"#111827", fontSize:24, fontWeight:"bold", offsetCenter:[0,"-10%"] },
+      data: [{ value: pct, name: "Usage %" }]
+    }]
+  });
+  window.addEventListener("resize", ()=>chart.resize());
+}
+function renderDonut(id, seriesData){
+  const el = document.getElementById(id);
+  if (!el) return;
+  const chart = echarts.init(el);
+  chart.setOption({
+    tooltip: { trigger: "item" },
+    series: [{ type: "pie", radius: ["40%","70%"], label: { formatter: "{b}\n{c} GB ({d}%)" }, data: seriesData }]
+  });
+  window.addEventListener("resize", ()=>chart.resize());
+}
+
+// KPI + Table
+function renderKPIsFromUsers(users){
+  const sum = (a,b)=>a+b;
+  const totalUsers = users.length;
+  const totalEnt = users.map(u=>u.entitled_gb).reduce(sum,0);
+  const totalUse = users.map(u=>u.total_usage_gb).reduce(sum,0);
+  const overallPct = totalEnt ? (totalUse/totalEnt)*100 : 0;
+  const avgPerUser = totalUsers ? totalUse/totalUsers : 0;
+
+  document.getElementById("total-users").textContent = totalUsers.toLocaleString();
+  document.getElementById("total-usage").textContent = `${totalUse.toFixed(1)} GB`;
+  document.getElementById("entitled-total").textContent = totalEnt.toFixed(1);
+  document.getElementById("avg-per-user").textContent = `${avgPerUser.toFixed(1)} GB`;
+  document.getElementById("overall-bar").style.width = `${Math.min(overallPct,100).toFixed(1)}%`;
+  document.getElementById("overall-pct-label").textContent = `${overallPct.toFixed(1)}% of allocation used`;
+  document.getElementById("gauge-value").textContent = `${totalUse.toFixed(1)} GB`;
+  document.getElementById("gauge-entitled").textContent = totalEnt.toFixed(1);
+
+  const badge = document.getElementById("gauge-status");
+  if (overallPct >= 150) { badge.textContent = `Critical: ${overallPct.toFixed(1)}% used`; badge.classList.remove("hidden"); }
+  else if (overallPct >= 100) { badge.textContent = `Over Allocation: ${overallPct.toFixed(1)}%`; badge.classList.remove("hidden"); }
+  else { badge.classList.add("hidden"); }
+
+  renderGauge(Math.min(overallPct, 100));
+
+  const apac = users.filter(u=>u.region==="APAC");
+  const global = users.filter(u=>u.region==="Global");
+  const apUse = apac.map(u=>u.total_usage_gb).reduce(sum,0);
+  const glUse = global.map(u=>u.total_usage_gb).reduce(sum,0);
+  const apEnt = apac.map(u=>u.entitled_gb).reduce(sum,0);
+  const glEnt = global.map(u=>u.entitled_gb).reduce(sum,0);
+
+  document.getElementById("apac-users").textContent = apac.length;
+  document.getElementById("global-users").textContent = global.length;
+  document.getElementById("avg-usage").textContent = `${avgPerUser.toFixed(1)} GB`;
+  document.getElementById("contract-types").textContent = new Set(users.map(u=>String(u.vas_code||"").split(" ")[0])).size;
+
+  document.getElementById("apac-usage").textContent = `${apUse.toFixed(1)} GB`;
+  document.getElementById("apac-entitled").textContent = apEnt.toFixed(1);
+  document.getElementById("apac-pct").textContent = apEnt ? ((apUse/apEnt)*100).toFixed(1) : "0.0";
+  renderDonut("apac-chart", [
+    {name:"Usage", value:Number(apUse.toFixed(1))},
+    {name:"Remain", value:Number(Math.max(apEnt-apUse,0).toFixed(1))}
+  ]);
+
+  document.getElementById("global-usage").textContent = `${glUse.toFixed(1)} GB`;
+  document.getElementById("global-entitled").textContent = glEnt.toFixed(1);
+  document.getElementById("global-pct").textContent = glEnt ? ((glUse/glEnt)*100).toFixed(1) : "0.0";
+  renderDonut("global-chart", [
+    {name:"Usage", value:Number(glUse.toFixed(1))},
+    {name:"Remain", value:Number(Math.max(glEnt-glUse,0).toFixed(1))}
+  ]);
+}
+
+function renderTable(data){
+  data.sort((a,b)=> (a[sortKey] > b[sortKey] ? sortDir : -sortDir));
+  const start = page*pageSize, slice = data.slice(start, start+pageSize);
+  const tbody = document.getElementById("users-table-body");
+  tbody.innerHTML = "";
+  for (const u of slice){
+    const pct = u.usage_percentage;
+    const barColor = pct>=100? "#ef4444" : (pct>=70? "#f59e0b" : "#22c55e");
+    const status = pct>=150 ? `<span class="px-2 py-1 rounded-full text-xs font-medium bg-red-100 text-red-800">Critical</span>`
+                : pct>=100 ? `<span class="px-2 py-1 rounded-full text-xs font-medium bg-amber-100 text-amber-800">Over</span>`
+                            : `<span class="px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">OK</span>`;
+    const tr = document.createElement("tr");
+    tr.className = "border-b border-gray-200 hover:bg-gray-50 transition-colors";
+    tr.innerHTML = `
+      <td class="py-3 px-4 font-mono text-sm text-gray-900">${escapeHtml(u.user_id)}</td>
+      <td class="py-3 px-4 text-sm text-gray-700"><span class="px-2 py-1 rounded-full text-xs font-medium ${u.region==='APAC'?'bg-blue-100 text-blue-800':'bg-green-100 text-green-800'}">${u.region}</span></td>
+      <td class="py-3 px-4 text-sm text-gray-700">${escapeHtml(u.department)}</td>
+      <td class="py-3 px-4 text-right font-mono text-sm font-medium text-gray-900">${u.total_usage_gb.toFixed(2)}</td>
+      <td class="py-3 px-4"><div class="progress-bar"><div class="progress-fill" style="width:${Math.min(pct,100)}%; background:${barColor}"></div></div></td>
+      <td class="py-3 px-4">${status}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  document.getElementById("showing-count").textContent = slice.length;
+  document.getElementById("total-count").textContent = data.length;
+}
+
+// Filters/sorting/paging
+function applyFilters(){
+  const q = (document.getElementById("user-search").value ?? "").toLowerCase();
+  const r = document.getElementById("region-filter").value;
+  filteredUsers = allUsers.filter(u=>{
+    const inRegion = (r==="all") || (u.region===r);
+    const text = (u.user_id+" "+u.region+" "+u.department+" "+(u.vas_code||"")).toLowerCase();
+    return inRegion && text.includes(q);
+  });
+  page = 0;
+  renderKPIsFromUsers(filteredUsers);
+  renderTable(filteredUsers);
+}
+function sortTable(key){ if (sortKey===key) sortDir*=-1; else { sortKey = key; sortDir = -1; } renderTable(filteredUsers); }
+function nextPage(){ if ((page+1)*pageSize < filteredUsers.length){ page++; renderTable(filteredUsers); } }
+function previousPage(){ if (page>0){ page--; renderTable(filteredUsers); } }
+
+// -------------------- ACTIONS --------------------
+
+// Export CSV
+function exportCSV(){
+  const rows = filteredUsers.length ? filteredUsers : allUsers;
+  const headers = ['User ID','Region','Department','Usage (GB)','Entitled (GB)','Usage %'];
+  const data = rows.map(u => [
+    u.user_id, u.region, u.department,
+    u.total_usage_gb, u.entitled_gb, u.usage_percentage
+  ]);
+  const csv = [headers, ...data]
+    .map(r => r.map(f => `"${String(f).replace(/"/g,'""')}"`).join(','))
+    .join('\n');
+  downloadFile(csv, 'roaming-data-usage.csv', 'text/csv;charset=utf-8;');
+  showNotification('CSV downloaded', 'success');
+}
+
+// Export PDF (jsPDF + autoTable)
+function exportPDF(){
+  try{
+    const rows = filteredUsers.length ? filteredUsers : allUsers;
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation:'landscape', unit:'pt', format:'a4' });
+
+    doc.setFontSize(14);
+    doc.text('Roaming Data Usage - Current View', 40, 40);
+
+    const body = rows.map(u => [
+      u.user_id,
+      u.region,
+      u.department,
+      u.total_usage_gb.toFixed(2),
+      u.entitled_gb,
+      u.usage_percentage
+    ]);
+
+    doc.autoTable({
+      startY: 60,
+      head: [['User ID','Region','Department','Usage (GB)','Entitled (GB)','Usage %']],
+      body,
+      styles: { fontSize: 9 },
+      headStyles: { fillColor: [37,99,235] } // blue-600
+    });
+
+    doc.save('roaming-data-usage.pdf');
+    showNotification('PDF generated', 'success');
+  }catch(e){
+    console.error(e);
+    showNotification('PDF export failed', 'error');
+  }
+}
+
+// Schedule Report (download .ics for Outlook)
+function scheduleReport(){
+  // Create a 30-min meeting for tomorrow 09:00 local time
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), now.getDate()+1, 9, 0, 0);
+  const end   = new Date(start.getTime() + 30*60000);
+
+  const toICS = dt => dt.toISOString()
+                        .replace(/[-:]/g,'')
+                        .replace(/\.\d{3}Z$/,'Z');
+
+  const ics = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Roaming Dashboard//EN',
+    'CALSCALE:GREGORIAN',
+    'METHOD:PUBLISH',
+    'BEGIN:VEVENT',
+    `UID:${Date.now()}@roaming-dashboard`,
+    `DTSTAMP:${toICS(new Date())}`,
+    `DTSTART:${toICS(start)}`,
+    `DTEND:${toICS(end)}`,
+    'SUMMARY:Roaming Data Usage Review',
+    `DESCRIPTION:Open the dashboard: https://jontrewyn.github.io/mobile-usage-dashboard/`,
+    `URL:https://jontrewyn.github.io/mobile-usage-dashboard/`,
+    'END:VEVENT',
+    'END:VCALENDAR'
+  ].join('\r\n');
+
+  downloadFile(ics, 'roaming-report.ics', 'text/calendar;charset=utf-8;');
+  showNotification('Calendar invite (ICS) downloaded', 'success');
+}
+
+// View All Alerts (modal)
+function viewAllAlerts(){
+  const critical = (filteredUsers.length ? filteredUsers : allUsers).filter(u => u.usage_percentage >= 150);
+  const warning  = (filteredUsers.length ? filteredUsers : allUsers).filter(u => u.usage_percentage >= 100 && u.usage_percentage < 150);
+
+  const section = (title, arr, color) => `
+    <div>
+      <h4 class="font-display text-md font-semibold text-${color}-800 mb-2">${title} <span class="text-${color}-600">(${arr.length})</span></h4>
+      ${arr.length ? `
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b">
+                <th class="text-left py-2 pr-3 text-gray-700">User ID</th>
+                <th class="text-left py-2 pr-3 text-gray-700">Region</th>
+                <th class="text-left py-2 pr-3 text-gray-700">Department</th>
+                <th class="text-right py-2 pr-3 text-gray-700">Usage (GB)</th>
+                <th class="text-right py-2 pr-3 text-gray-700">Entitled (GB)</th>
+                <th class="text-right py-2 pr-0 text-gray-700">% Used</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${arr.map(u => `
+                <tr class="border-b hover:bg-gray-50">
+                  <td class="py-2 pr-3 font-mono">${escapeHtml(u.user_id)}</td>
+                  <td class="py-2 pr-3">${escapeHtml(u.region)}</td>
+                  <td class="py-2 pr-3">${escapeHtml(u.department)}</td>
+                  <td class="py-2 pr-3 text-right font-mono">${u.total_usage_gb.toFixed(2)}</td>
+                  <td class="py-2 pr-3 text-right font-mono">${u.entitled_gb}</td>
+                  <td class="py-2 pr-0 text-right font-mono">${u.usage_percentage}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
         </div>
-        <div class="text-right">
-          <div class="text-sm text-blue-200">Last Updated</div>
-          <div class="font-mono text-lg" id="last-updated">–</div>
-          <button class="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors" onclick="refreshData()">
-            <span class="flex items-center">
-              <div class="w-2 h-2 bg-green-400 rounded-full pulse-dot mr-2"></div>
-              Refresh
-            </span>
-          </button>
-        </div>
-      </div>
+      ` : `<p class="text-gray-500">No users in this category.</p>`}
     </div>
-  </header>
+  `;
 
-  <!-- KPI Cards -->
-  <section class="py-8">
-    <div class="container mx-auto px-6">
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div class="bg-white rounded-xl shadow-lg p-6 card-hover border-l-4 border-blue-500">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-gray-600 text-sm font-medium">Total Users</p>
-              <p class="font-display text-3xl font-bold text-gray-900" id="total-users">–</p>
-            </div>
-            <div class="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center">
-              <svg class="w-6 h-6 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/>
-              </svg>
-            </div>
-          </div>
-          <div class="mt-4 flex items-center text-sm">
-            <span class="text-green-600 font-medium">+12%</span>
-            <span class="text-gray-500 ml-2">vs last month</span>
-          </div>
-        </div>
+  const body = document.getElementById('alerts-modal-body');
+  body.innerHTML = `
+    ${section('Critical (>= 150%)', critical, 'red')}
+    ${section('Warning (> 100% and < 150%)', warning, 'amber')}
+  `;
 
-        <div class="bg-white rounded-xl shadow-lg p-6 card-hover border-l-4 border-amber-500">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-gray-600 text-sm font-medium">Total Usage</p>
-              <p class="font-display text-3xl font-bold text-gray-900" id="total-usage">–</p>
-              <p class="text-sm text-gray-500">of <span id="entitled-total">–</span> GB allocated</p>
-            </div>
-            <div class="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center">
-              <svg class="w-6 h-6 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
-              </svg>
-            </div>
-          </div>
-          <div class="mt-4">
-            <div class="w-full bg-gray-200 rounded-full h-2">
-              <div id="overall-bar" class="bg-red-500 h-2 rounded-full" style="width: 0%"></div>
-            </div>
-            <p id="overall-pct-label" class="text-sm text-red-600 mt-1 font-medium">–% of allocation used</p>
-          </div>
-        </div>
+  const modal = document.getElementById('alerts-modal');
+  modal.classList.remove('hidden');
+  modal.classList.add('flex');
+}
+function closeAlertsModal(){
+  const modal = document.getElementById('alerts-modal');
+  modal.classList.add('hidden');
+  modal.classList.remove('flex');
+}
 
-        <div class="bg-white rounded-xl shadow-lg p-6 card-hover border-l-4 border-green-500">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-gray-600 text-sm font-medium">Average per User</p>
-              <p class="font-display text-3xl font-bold text-gray-900" id="avg-per-user">–</p>
-            </div>
-            <div class="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center">
-              <svg class="w-6 h-6 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v1"/>
-              </svg>
-            </div>
-          </div>
-          <div class="mt-4 flex items-center text-sm">
-            <span id="avg-flag" class="text-red-600 font-medium">–</span>
-            <span class="text-gray-500 ml-2">monitor closely</span>
-          </div>
-        </div>
+// File download helper
+function downloadFile(content, filename, contentType){
+  const blob = new Blob([content], { type: contentType });
+  const url  = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  URL.revokeObjectURL(url);
+  document.body.removeChild(a);
+}
 
-        <div class="bg-white rounded-xl shadow-lg p-6 card-hover border-l-4 border-red-500">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-gray-600 text-sm font-medium">Active Alerts</p>
-              <p class="font-display text-3xl font-bold text-gray-900" id="active-alerts">23</p>
-            </div>
-            <div class="w-12 h-12 bg-red-100 rounded-lg flex items-center justify-center">
-              <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"/>
-              </svg>
-            </div>
-          </div>
-          <div class="mt-4 flex items-center text-sm">
-            <span class="text-red-600 font-medium">High priority</span>
-            <span class="text-gray-500 ml-2">require attention</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
+// Load JSON
+async function refreshData(){
+  const overlay = document.getElementById("loading-overlay");
+  overlay.classList.remove("hidden"); overlay.classList.add("flex");
+  try{
+    const rsp = await fetch(JSON_URL, { cache: "no-store" });
+    if (!rsp.ok) throw new Error(`JSON fetch failed: ${rsp.status}`);
+    const json = await rsp.json();
 
-  <!-- Main Grid -->
-  <section class="py-8">
-    <div class="container mx-auto px-6">
-      <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+    // Normalize to users[]
+    allUsers = (json.top_users || []).map(u => ({
+      user_id: u.User_ID || u.user_id,
+      region: u.Region || u.region,
+      department: u.Department || u.department || "Unknown",
+      vas_code: u.VAS_Code || u.vas_code || "",
+      total_usage_gb: u.Total_Usage_GB ?? u.total_usage_gb ?? 0,
+      entitled_gb: u.Entitled_GB ?? u.entitled_gb ?? 6,
+      usage_percentage: u.Usage_Percentage ?? u.usage_percentage ?? 0
+    }));
+    filteredUsers = allUsers.slice();
 
-        <!-- Left Column -->
-        <div class="lg:col-span-1">
-          <div class="bg-white rounded-xl shadow-lg p-6">
-            <h2 class="font-display text-xl font-semibold text-gray-900 mb-4">Usage Overview</h2>
-            <div id="speedometer-gauge" class="gauge-container"></div>
-            <div class="mt-4 text-center">
-              <p class="text-sm text-gray-600 mb-2">Total Network Usage</p>
-              <p class="font-mono text-2xl font-bold text-gray-900" id="gauge-value">–</p>
-              <p class="text-sm text-gray-500">of <span id="gauge-entitled">–</span> GB allocated</p>
-              <div id="gauge-status" class="mt-3 px-3 py-1 bg-red-100 text-red-800 rounded-full text-sm font-medium hidden"></div>
-            </div>
-          </div>
+    updateTimestamp();
+    renderKPIsFromUsers(filteredUsers);
+    renderTable(filteredUsers);
+  }catch(e){
+    console.error(e);
+    alert("Could not load JSON: " + e.message);
+  }finally{
+    overlay.classList.add("hidden"); overlay.classList.remove("flex");
+  }
+}
 
-          <div class="bg-white rounded-xl shadow-lg p-6 mt-6">
-            <h3 class="font-display text-lg font-semibold text-gray-900 mb-4">Quick Stats</h3>
-            <div class="space-y-4">
-              <div class="flex justify-between items-center"><span class="text-gray-600">APAC Users</span><span class="font-mono font-bold text-blue-600" id="apac-users">–</span></div>
-              <div class="flex justify-between items-center"><span class="text-gray-600">Global Users</span><span class="font-mono font-bold text-green-600" id="global-users">–</span></div>
-              <div class="flex justify-between items-center"><span class="text-gray-600">Avg Usage per User</span><span class="font-mono font-bold text-amber-600" id="avg-usage">–</span></div>
-              <div class="flex justify-between items-center"><span class="text-gray-600">Contract Types</span><span class="font-mono font-bold text-purple-600" id="contract-types">–</span></div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Center Column -->
-        <div class="lg:col-span-2">
-          <div class="bg-white rounded-xl shadow-lg p-6 mb-6">
-            <h2 class="font-display text-xl font-semibold text-gray-900 mb-6">Regional Usage Breakdown</h2>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div>
-                <h3 class="text-lg font-medium text-gray-800 mb-3 text-center">APAC Users</h3>
-                <div id="apac-chart" style="height: 250px;"></div>
-                <div class="mt-3 text-center">
-                  <p class="text-sm text-gray-600">Total: <span id="apac-usage">–</span> of <span id="apac-entitled">–</span> GB</p>
-                  <p class="text-sm font-medium text-red-600"><span id="apac-pct">–</span>% utilized</p>
-                </div>
-              </div>
-              <div>
-                <h3 class="text-lg font-medium text-gray-800 mb-3 text-center">Global Users</h3>
-                <div id="global-chart" style="height: 250px;"></div>
-                <div class="mt-3 text-center">
-                  <p class="text-sm text-gray-600">Total: <span id="global-usage">–</span> of <span id="global-entitled">–</span> GB</p>
-                  <p class="text-sm font-medium text-red-600"><span id="global-pct">–</span>% utilized</p>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="bg-white rounded-xl shadow-lg p-6">
-            <div class="flex items-center justify-between mb-6">
-              <h2 class="font-display text-xl font-semibold text-gray-900">Top Users by Usage</h2>
-              <div class="flex items-center space-x-3">
-                <input type="text" placeholder="Search users..." class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" id="user-search" oninput="applyFilters()">
-                <select class="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" id="region-filter" onchange="applyFilters()">
-                  <option value="all">All Regions</option>
-                  <option value="APAC">APAC</option>
-                  <option value="Global">Global</option>
-                </select>
-              </div>
-            </div>
-
-            <div class="overflow-x-auto">
-              <table class="w-full" id="users-table">
-                <thead>
-                  <tr class="border-b border-gray-200">
-                    <th class="text-left py-3 px-4 font-medium text-gray-700 cursor-pointer hover:bg-gray-50" onclick="sortTable('user_id')">User ID <span id="sort-user_id">↕</span></th>
-                    <th class="text-left py-3 px-4 font-medium text-gray-700 cursor-pointer hover:bg-gray-50" onclick="sortTable('region')">Region <span id="sort-region">↕</span></th>
-                    <th class="text-left py-3 px-4 font-medium text-gray-700 cursor-pointer hover:bg-gray-50" onclick="sortTable('department')">Department <span id="sort-department">↕</span></th>
-                    <th class="text-right py-3 px-4 font-medium text-gray-700 cursor-pointer hover:bg-gray-50" onclick="sortTable('total_usage_gb')">Usage (GB) <span id="sort-usage">↕</span></th>
-                    <th class="text-left py-3 px-4 font-medium text-gray-700">Progress</th>
-                    <th class="text-left py-3 px-4 font-medium text-gray-700">Status</th>
-                  </tr>
-                </thead>
-                <tbody id="users-table-body"></tbody>
-              </table>
-            </div>
-
-            <div class="mt-4 flex items-center justify-between">
-              <p class="text-sm text-gray-600">Showing <span id="showing-count">0</span> of <span id="total-count">0</span> users</p>
-              <div class="flex space-x-2">
-                <button class="px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50" onclick="previousPage()">Previous</button>
-                <button class="px-3 py-1 border border-gray-300 rounded text-sm hover:bg-gray-50" onclick="nextPage()">Next</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Right Column -->
-        <div class="lg:col-span-1">
-          <div class="bg-white rounded-xl shadow-lg p-6">
-            <h3 class="font-display text-lg font-semibold text-gray-900 mb-4">Filters & Controls</h3>
-            <div class="space-y-4">
-              <div>
-                <label class="block text-sm font-medium text-gray-700 mb-2">Date Range</label>
-                <select class="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option>Last 30 Days</option><option>Last 7 Days</option><option>This Month</option><option>Last Month</option><option>Custom Range</option>
-                </select>
-              </div>
-              <div>
-                <label class="block text-sm font-medium text-gray-700 mb-2">Contract Type</label>
-                <div class="space-y-2">
-                  <label class="flex items-center"><input type="checkbox" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" checked><span class="ml-2 text-sm text-gray-700">RCD3F</span></label>
-                  <label class="flex items-center"><input type="checkbox" class="rounded border-gray-300 text-blue-600 focus:ring-blue-500" checked><span class="ml-2 text-sm text-gray-700">RCD3G</span></label>
-                </div>
-              </div>
-              <div>
-                <label class="block text-sm font-medium text-gray-700 mb-2">Usage Threshold Alert</label>
-                <input type="range" min="50" max="150" value="80" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" id="threshold-slider" oninput="document.getElementById('threshold-value').textContent=this.value+'%';">
-                <div class="flex justify-between text-xs text-gray-500 mt-1">
-                  <span>50%</span><span id="threshold-value">80%</span><span>150%</span>
-                </div>
-              </div>
-              <button class="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg transition-colors" onclick="applyFilters()">Apply Filters</button>
-            </div>
-          </div>
-
-          <div class="bg-white rounded-xl shadow-lg p-6 mt-6">
-            <h3 class="font-display text-lg font-semibold text-gray-900 mb-4">Anomaly Detection</h3>
-            <div class="space-y-3" id="alerts-container">
-              <div class="p-3 bg-red-50 border-l-4 border-red-500 rounded">
-                <div class="flex items-center justify-between"><span class="text-sm font-medium text-red-800">Critical Alert</span><span class="text-xs text-red-600">just now</span></div>
-                <p class="text-sm text-red-700 mt-1">Top user exceeded 200% allocation</p>
-              </div>
-              <div class="p-3 bg-amber-50 border-l-4 border-amber-500 rounded">
-                <div class="flex items-center justify-between"><span class="text-sm font-medium text-amber-800">Warning</span><span class="text-xs text-amber-600">today</span></div>
-                <p class="text-sm text-amber-700 mt-1">APAC region usage spike detected</p>
-              </div>
-            </div>
-            <button class="w-full mt-4 text-blue-600 hover:text-blue-700 text-sm font-medium">View All Alerts →</button>
-          </div>
-        </div>
-
-      </div>
-    </div>
-  </section>
-
-  <!-- Footer -->
-  <footer class="bg-slate-800 text-white py-8 mt-12">
-    <div class="container mx-auto px-6">
-      <div class="flex items-center justify-between">
-        <div>
-          <p class="text-slate-300">© 2025 Roaming Data Analytics Dashboard</p>
-          <p class="text-slate-400 text-sm mt-1">Powered by ECharts.js and Real-time Data Processing</p>
-        </div>
-        <div class="text-right">
-          <p class="text-slate-300">Data Source: GitHub Pages (JSON)</p>
-          <p class="text-slate-400 text-sm mt-1">Auto-refresh every 5 minutes</p>
-        </div>
-      </div>
-    </div>
-  </footer>
-
-  <!-- Loading Overlay -->
-  <div id="loading-overlay" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
-    <div class="bg-white rounded-lg p-8 text-center">
-      <div class="loading-skeleton w-16 h-16 rounded-full mx-auto mb-4"></div>
-      <p class="text-gray-600">Loading data...</p>
-    </div>
-  </div>
-
-  <!-- Your app logic -->
-  <script src="./main.js"></script>
-</body>
-</html>
+// Init
+document.addEventListener("DOMContentLoaded", () => {
+  if (typeof Typed !== "undefined"){
+    new Typed('#dashboard-title', {
+      strings: ['Roaming Data Usage Dashboard', 'Real-time Analytics Dashboard', 'Network Usage Monitor'],
+      typeSpeed: 50, backSpeed: 30, backDelay: 2000, loop: true
+    });
+  }
+  refreshData();
+  setInterval(updateTimestamp, 60000);
+});
